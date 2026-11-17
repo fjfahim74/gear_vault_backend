@@ -1,6 +1,7 @@
 import { Router } from "express";
 import equipmentRouter from "./equipment/index.js";
-import verifyApi from "../middlewares/verifyApi.js";
+import verifyToken, { verifyRenter, verifyOwner } from "../middlewares/verifyApi.js";
+import { verifyAdmin } from "../middlewares/verifyApi.js";
 
 const router = Router();
 
@@ -11,11 +12,9 @@ router.get("/test", (req, res) => {
     });
 });
 
-router.get("/check-user", verifyApi, (req, res) => {
-    console.log(req.user);
-
+router.get("/check-user", verifyToken, verifyAdmin, (req, res) => {
     res.send({
-        message: "User authenticated!",
+        message: "Admin access granted!",
         user: req.user
     });
 });
