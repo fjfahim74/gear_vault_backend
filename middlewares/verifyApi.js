@@ -21,6 +21,7 @@ const verifyApi = async (req, res, next) => {
         const { payload } = await jwtVerify(token, JWKS);
 
         req.user = payload;
+        console.log(req.user);
 
         next();
     } catch (error) {
