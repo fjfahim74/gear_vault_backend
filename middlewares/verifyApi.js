@@ -6,24 +6,20 @@ const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).send({
-            message: "Unauthorized!"
-        });
+        return res.status(401).send({ message: "Unauthorized!" });
     }
 
-    const token = authHeader.split(" ")[1];
-
     try {
+        const token = authHeader.split(" ")[1];
+
         const JWKS = createRemoteJWKSet(
             new URL(`${process.env.CLIENT_URL}/api/auth/jwks`)
         );
 
         const { payload } = await jwtVerify(token, JWKS);
 
-        if (!payload.id || !ObjectId.isValid(payload.id)) {
-            return res.status(401).send({
-                message: "Unauthorized!"
-            });
+        if (!ObjectId.isValid(payload.id)) {
+            return res.status(401).send({ message: "Unauthorized!" });
         }
 
         const user = await usersCollection.findOne({
@@ -31,9 +27,7 @@ const verifyToken = async (req, res, next) => {
         });
 
         if (!user) {
-            return res.status(401).send({
-                message: "Unauthorized!"
-            });
+            return res.status(401).send({ message: "Unauthorized!" });
         }
 
         req.user = {
@@ -43,41 +37,25 @@ const verifyToken = async (req, res, next) => {
 
         next();
     } catch (error) {
-        return res.status(401).send({
-            message: "Unauthorized!"
-        });
+        return res.status(401).send({ message: "Unauthorized!" });
     }
 };
 
-const verifyRenter = (req, res, next) => {
-    if (req.user?.role !== "Customer") {
-        return res.status(403).send({
-            message: "Forbidden! Only customers can access this resource."
-        });
-    }
+const verifyRole = (roles) => {
+    return (req, res, next) => {
+        if (!roles.includes(req.user?.role)) {
+            return res.status(403).send({
+                message: "Forbidden! You do not have permission."
+            });
+        }
 
-    next();
+        next();
+    };
 };
 
-const verifyOwner = (req, res, next) => {
-    if (req.user?.role !== "Owner") {
-        return res.status(403).send({
-            message: "Forbidden! Only equipment owners can access this resource."
-        });
-    }
-
-    next();
-};
-
-const verifyAdmin = (req, res, next) => {
-    if (req.user?.role !== "Admin") {
-        return res.status(403).send({
-            message: "Forbidden! Only administrators can access this resource."
-        });
-    }
-
-    next();
-};
+const verifyRenter = verifyRole(["Customer"]);
+const verifyOwner = verifyRole(["Owner"]);
+const verifyAdmin = verifyRole(["Admin"]);
 
 export { verifyRenter, verifyOwner, verifyAdmin };
 export default verifyToken;
