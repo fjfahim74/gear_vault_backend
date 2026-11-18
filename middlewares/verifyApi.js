@@ -1,4 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { ObjectId } from "mongodb";
+import { usersCollection } from "../config/db.js";
 
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -18,7 +20,26 @@ const verifyToken = async (req, res, next) => {
 
         const { payload } = await jwtVerify(token, JWKS);
 
-        req.user = payload;
+        if (!payload.id || !ObjectId.isValid(payload.id)) {
+            return res.status(401).send({
+                message: "Unauthorized!"
+            });
+        }
+
+        const user = await usersCollection.findOne({
+            _id: new ObjectId(payload.id)
+        });
+
+        if (!user) {
+            return res.status(401).send({
+                message: "Unauthorized!"
+            });
+        }
+
+        req.user = {
+            ...payload,
+            role: user.role
+        };
 
         next();
     } catch (error) {

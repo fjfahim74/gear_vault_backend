@@ -8,6 +8,7 @@ const equipmentCollection = db.collection("equipment");
 const favoritesCollection = db.collection("favorites");
 const bookingsCollection = db.collection("bookings");
 const paymentsCollection = db.collection("payments");
+const usersCollection = db.collection("user");
 
 const connectDB = async () => {
     await client.connect();
@@ -20,5 +21,6 @@ export {
     equipmentCollection,
     favoritesCollection,
     bookingsCollection,
-    paymentsCollection
+    paymentsCollection,
+    usersCollection
 };

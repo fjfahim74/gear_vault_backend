@@ -1,7 +1,6 @@
 import { Router } from "express";
 import equipmentRouter from "./equipment/index.js";
-import verifyToken, { verifyRenter, verifyOwner } from "../middlewares/verifyApi.js";
-import { verifyAdmin } from "../middlewares/verifyApi.js";
+import usersRouter from "./users/index.js";
 
 const router = Router();
 
@@ -12,13 +11,7 @@ router.get("/test", (req, res) => {
     });
 });
 
-router.get("/check-user", verifyToken, verifyAdmin, (req, res) => {
-    res.send({
-        message: "Admin access granted!",
-        user: req.user
-    });
-});
-
 router.use("/equipment", equipmentRouter);
+router.use("/users", usersRouter);
 
 export default router;
