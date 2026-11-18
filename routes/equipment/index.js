@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
-import { equipmentCollection } from "../../config/db.js";
+import { equipmentCollection, usersCollection } from "../../config/db.js";
 import verifyToken, { verifyOwner } from "../../middlewares/verifyApi.js";
 
 const router = Router();
@@ -19,6 +19,36 @@ router.post("/", verifyToken, verifyOwner, async (req, res) => {
     const result = await equipmentCollection.insertOne(equipment);
 
     res.status(201).send(result);
+});
+
+
+// Get 6 featured approved equipment
+router.get("/featured", async (req, res) => {
+    const result = await equipmentCollection
+        .find({ status: "Approved" })
+        .limit(6)
+        .toArray();
+
+    res.send(result);
+});
+
+// Get single equipment
+router.get("/:id", verifyToken, async (req, res) => {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID" });
+    }
+
+    const result = await equipmentCollection.findOne({
+        _id: new ObjectId(id)
+    });
+
+    if (!result) {
+        return res.status(404).send({ message: "Equipment not found" });
+    }
+
+    res.send(result);
 });
 
 // Get approved equipment with search and filters
@@ -147,15 +177,6 @@ router.delete("/:id", verifyToken, verifyOwner, async (req, res) => {
     }
 
     res.send({ message: "Equipment deleted successfully." });
-});
-
-// Get all approved equipment
-router.get("/", async (req, res) => {
-    const result = await equipmentCollection
-        .find({ status: "Approved" })
-        .toArray();
-
-    res.send(result);
 });
 
 export default router;
