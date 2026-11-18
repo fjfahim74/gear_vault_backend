@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { equipmentCollection, usersCollection } from "../../config/db.js";
-import verifyToken, { verifyOwner } from "../../middlewares/verifyApi.js";
+import verifyToken, { verifyOwner, verifyAdmin } from "../../middlewares/verifyApi.js";
 
 const router = Router();
 
@@ -47,6 +47,43 @@ router.get("/:id", verifyToken, async (req, res) => {
     if (!result) {
         return res.status(404).send({ message: "Equipment not found" });
     }
+
+    res.send(result);
+});
+
+// Get owner's equipment
+router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
+    const result = await equipmentCollection.find({
+        ownerId: req.user.id
+    }).toArray();
+
+    res.send(result);
+});
+
+// Get all equipment for admin
+router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
+    const result = await equipmentCollection.find({}).toArray();
+
+    res.send(result);
+});
+
+// Update equipment status by admin
+router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const data = req.body;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID" });
+    }
+
+    if (!["Approved", "Rejected"].includes(data.status)) {
+        return res.status(400).send({ message: "Invalid status" });
+    }
+
+    const result = await equipmentCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: data }
+    );
 
     res.send(result);
 });
