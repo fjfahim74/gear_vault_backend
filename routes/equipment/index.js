@@ -21,11 +21,62 @@ router.post("/", verifyToken, verifyOwner, async (req, res) => {
     res.status(201).send(result);
 });
 
-// Get equipment added by the logged-in owner
-router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
+// Get approved equipment with search and filters
+router.get("/", async (req, res) => {
+    const { search, category, rentalType, availability, minPrice, maxPrice } = req.query;
+
+    const query = {
+        status: "Approved"
+    };
+
+    // Search by equipment name or category
+    if (search) {
+        query.$or = [
+            { name: { $regex: search, $options: "i" } },
+            { category: { $regex: search, $options: "i" } },
+            { location: { $regex: search, $options: "i" } }
+        ];
+    }
+
+    // Filter by category
+    if (category) {
+        query.category = category;
+    }
+
+    if (rentalType) {
+        query.rentalType = rentalType;
+    }
+
+    // Filter by availability
+    if (availability === "available") {
+        query.availableQuantity = { $gt: 0 };
+    } else if (availability === "unavailable") {
+        query.availableQuantity = { $lte: 0 };
+    }
+
+    if (minPrice || maxPrice) {
+        query.rentalPrice = {};
+
+        if (minPrice) {
+            query.rentalPrice.$gte = Number(minPrice);
+        }
+
+        if (maxPrice) {
+            query.rentalPrice.$lte = Number(maxPrice);
+        }
+    }
+
+    const sort = {};
+
+    if (req.query.sort === "price-low") {
+        sort.rentalPrice = 1;
+    } else if (req.query.sort === "price-high") {
+        sort.rentalPrice = -1;
+    }
+
     const result = await equipmentCollection
-        .find({ ownerId: req.user.id })
-        .sort({ createdAt: -1 })
+        .find(query)
+        .sort(sort)
         .toArray();
 
     res.send(result);
