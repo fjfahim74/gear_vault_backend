@@ -1,6 +1,7 @@
 import { Router } from "express";
 import equipmentRouter from "./equipment/index.js";
 import usersRouter from "./users/index.js";
+import favoritesRouter from "./favorites/index.js";
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.get("/test", (req, res) => {
 
 router.use("/equipment", equipmentRouter);
 router.use("/users", usersRouter);
+router.use("/favorites", favoritesRouter);
 
 export default router;
