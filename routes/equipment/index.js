@@ -32,6 +32,15 @@ router.get("/featured", async (req, res) => {
     res.send(result);
 });
 
+// Get owner's equipment
+router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
+    const result = await equipmentCollection.find({
+        ownerId: req.user.id
+    }).toArray();
+
+    res.send(result);
+});
+
 // Get single equipment
 router.get("/:id", verifyToken, async (req, res) => {
     const { id } = req.params;
@@ -51,14 +60,7 @@ router.get("/:id", verifyToken, async (req, res) => {
     res.send(result);
 });
 
-// Get owner's equipment
-router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
-    const result = await equipmentCollection.find({
-        ownerId: req.user.id
-    }).toArray();
 
-    res.send(result);
-});
 
 // Get all equipment for admin
 router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
@@ -139,6 +141,8 @@ router.get("/", async (req, res) => {
         sort.rentalPrice = 1;
     } else if (req.query.sort === "price-high") {
         sort.rentalPrice = -1;
+    } else if (req.query.sort === "recently-added") {
+        sort.createdAt = -1;
     }
 
     const result = await equipmentCollection
