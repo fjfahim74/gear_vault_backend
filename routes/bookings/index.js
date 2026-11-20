@@ -8,6 +8,8 @@ import {
 } from "../../config/db.js";
 import verifyToken, { verifyRenter } from "../../middlewares/verifyApi.js";
 import { stripe } from "../../config/stripe.js";
+import processCheckoutSession from "../../utils/processCheckoutSession.js";
+
 
 const router = Router();
 
@@ -276,7 +278,7 @@ router.post("/create-checkout-session", verifyToken, verifyRenter, async (req, r
 
             success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
 
-            cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+            cancel_url: `${process.env.CLIENT_URL}/payment/cancel?hold_id=${holdResult.insertedId}`,
 
             expires_at: Math.floor(hold.expiresAt.getTime() / 1000),
 
@@ -319,6 +321,90 @@ router.post("/create-checkout-session", verifyToken, verifyRenter, async (req, r
     }
 });
 
+// Cancel Stripe Checkout and Release Booking Hold
+router.post("/cancel-checkout", verifyToken, verifyRenter, async (req, res) => {
+    const { holdId } = req.body;
+
+    if (!ObjectId.isValid(holdId)) {
+        return res.status(400).send({
+            message: "Invalid booking information."
+        });
+    }
+
+    try {
+        // Find customer's booking hold
+        const hold = await bookingHoldsCollection.findOne({
+            _id: new ObjectId(holdId),
+            customerId: req.user.id
+        });
+
+        if (!hold) {
+            return res.send({
+                success: true,
+                message: "Booking hold already released."
+            });
+        }
+
+        if (!hold.stripeSessionId) {
+            return res.status(400).send({
+                message: "Stripe session not found."
+            });
+        }
+
+        // Retrieve Stripe Checkout Session
+        let session = await stripe.checkout.sessions.retrieve(
+            hold.stripeSessionId
+        );
+
+        // Expire the session if it is still open
+        if (session.status === "open") {
+            try {
+                session = await stripe.checkout.sessions.expire(
+                    hold.stripeSessionId
+                );
+            } catch (error) {
+                // Check the latest status if expiration fails
+                session = await stripe.checkout.sessions.retrieve(
+                    hold.stripeSessionId
+                );
+            }
+        }
+
+        // Release hold only after Stripe confirms expiration
+        if (session.status === "expired") {
+            await bookingHoldsCollection.deleteOne({
+                _id: hold._id
+            });
+
+            return res.send({
+                success: true,
+                message: "Checkout cancelled and booking hold released."
+            });
+        }
+
+        // Payment may already have completed
+        if (session.status === "complete") {
+            return res.send({
+                success: true,
+                paymentCompleted: session.payment_status === "paid",
+                sessionId: session.id,
+                message: "Checkout has already been completed."
+            });
+        }
+
+        return res.status(409).send({
+            message: "Unable to cancel this checkout session."
+        });
+
+    } catch (error) {
+        console.error("Checkout cancellation error:", error);
+
+        res.status(500).send({
+            message: "Unable to cancel checkout."
+        });
+    }
+});
+
 // Verify Checkout Payment
 router.post("/checkout-verify", verifyToken, verifyRenter, async (req, res) => {
     const { sessionId } = req.body;
@@ -330,137 +416,26 @@ router.post("/checkout-verify", verifyToken, verifyRenter, async (req, res) => {
     }
 
     try {
-        // Get payment session from Stripe
+        // Retrieve payment session from Stripe
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        if (session.status !== "complete" || session.payment_status !== "paid") {
-            return res.status(400).send({
-                message: "Payment verification failed."
-            });
-        }
-
-        // Check customer
-        if (session.metadata.customerId !== req.user.id) {
+        // Check customer ownership
+        if (session.metadata?.customerId !== req.user.id) {
             return res.status(403).send({
                 message: "Unauthorized payment session."
             });
         }
 
-        // Check if payment was already processed
-        const existingBooking = await bookingsCollection.findOne({
-            stripeSessionId: sessionId
-        });
+        // Process payment and confirm booking
+        const result = await processCheckoutSession(session);
 
-        const existingPayment = await paymentsCollection.findOne({
-            stripeSessionId: sessionId
-        });
-
-        if (existingBooking && existingPayment) {
-            return res.send({
-                success: true,
-                message: "Payment already verified.",
-                booking: {
-                    _id: existingBooking._id,
-                    equipmentName: existingBooking.equipmentName,
-                    equipmentImage: existingBooking.equipmentImage,
-                    rentalStartDate: existingBooking.rentalStartDate,
-                    rentalEndDate: existingBooking.rentalEndDate,
-                    quantity: existingBooking.quantity,
-                    totalAmount: existingBooking.totalAmount
-                },
-                payment: {
-                    paymentIntentId: existingPayment.paymentIntentId,
-                    amount: existingPayment.amount,
-                    currency: existingPayment.currency
-                }
-            });
-        }
-
-        // Find booking hold
-        const holdId = session.metadata.holdId;
-
-        if (!ObjectId.isValid(holdId)) {
-            return res.status(400).send({
-                message: "Invalid booking information."
-            });
-        }
-
-        const hold = await bookingHoldsCollection.findOne({
-            _id: new ObjectId(holdId),
-            customerId: req.user.id,
-            stripeSessionId: sessionId
-        });
-
-        if (!hold) {
-            return res.status(404).send({
-                message: "Booking hold not found."
-            });
-        }
-
-        // Verify payment amount and currency
-        const expectedAmount = Math.round(hold.totalAmount * 100);
-        const expectedCurrency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
-
-        if (
-            session.amount_total !== expectedAmount ||
-            session.currency !== expectedCurrency
-        ) {
-            return res.status(400).send({
-                message: "Payment amount or currency mismatch."
-            });
-        }
-
-        // Create booking
-        const { _id, expiresAt, ...bookingData } = hold;
-
-        await bookingsCollection.updateOne(
-            { stripeSessionId: sessionId },
-            {
-                $setOnInsert: {
-                    ...bookingData,
-                    stripeSessionId: sessionId,
-                    paymentStatus: "Paid",
-                    bookingStatus: "Confirmed",
-                    createdAt: new Date()
-                }
-            },
-            { upsert: true }
-        );
-
-        const booking = await bookingsCollection.findOne({
-            stripeSessionId: sessionId
-        });
-
-        // Save payment information
-        await paymentsCollection.updateOne(
-            { stripeSessionId: sessionId },
-            {
-                $setOnInsert: {
-                    bookingId: booking._id,
-                    customerId: req.user.id,
-                    stripeSessionId: sessionId,
-                    paymentIntentId: session.payment_intent,
-                    amount: hold.totalAmount,
-                    currency: session.currency,
-                    status: "Paid",
-                    paidAt: new Date()
-                }
-            },
-            { upsert: true }
-        );
-
-        // Delete temporary booking hold
-        await bookingHoldsCollection.deleteOne({
-            _id: hold._id
-        });
-
-        const payment = await paymentsCollection.findOne({
-            stripeSessionId: sessionId
-        });
+        const { booking, payment, alreadyProcessed } = result;
 
         res.send({
             success: true,
-            message: "Payment successful. Booking confirmed.",
+            message: alreadyProcessed
+                ? "Payment already verified."
+                : "Payment successful. Booking confirmed.",
             booking: {
                 _id: booking._id,
                 equipmentName: booking.equipmentName,
