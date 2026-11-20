@@ -13,9 +13,20 @@ const bookingHoldsCollection = db.collection("bookingHolds");
 
 const connectDB = async () => {
     await client.connect();
+
+    // Prevent duplicate bookings and payments
+    await bookingsCollection.createIndex(
+        { stripeSessionId: 1 },
+        { unique: true, sparse: true }
+    );
+
+    await paymentsCollection.createIndex(
+        { stripeSessionId: 1 },
+        { unique: true }
+    );
+
     console.log("MongoDB connected successfully!");
 };
-
 export {
     db,
     connectDB,
