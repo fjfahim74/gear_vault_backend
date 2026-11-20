@@ -5,6 +5,21 @@ import verifyToken, { verifyOwner, verifyAdmin } from "../../middlewares/verifyA
 
 const router = Router();
 
+const allowedFields = [
+    "name",
+    "description",
+    "category",
+    "location",
+    "rentalPrice",
+    "rentalType",
+    "availableQuantity",
+    "condition",
+    "brand",
+    "model",
+    "imageUrl",
+    "rentalTerms"
+];
+
 // Create new equipment
 router.post("/", verifyToken, verifyOwner, async (req, res) => {
     const equipment = {
@@ -17,10 +32,8 @@ router.post("/", verifyToken, verifyOwner, async (req, res) => {
     };
 
     const result = await equipmentCollection.insertOne(equipment);
-
     res.status(201).send(result);
 });
-
 
 // Get 6 featured approved equipment
 router.get("/featured", async (req, res) => {
@@ -39,6 +52,129 @@ router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
     }).toArray();
 
     res.send(result);
+});
+
+// Get all equipment for admin
+router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
+    const equipment = await equipmentCollection.find({}).toArray();
+
+    const ownerEmails = [...new Set(
+        equipment.map((item) => item.ownerEmail).filter(Boolean)
+    )];
+
+    const owners = await usersCollection.find({
+        email: { $in: ownerEmails }
+    }).toArray();
+
+    const result = equipment.map((item) => {
+        const owner = owners.find(
+            (user) => user.email === item.ownerEmail
+        );
+
+        return {
+            ...item,
+            ownerName: owner?.name || "Unknown"
+        };
+    });
+
+    res.send(result);
+});
+
+// Update equipment status by admin
+router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { status, rejectionReason } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID" });
+    }
+
+    if (!["Approved", "Rejected"].includes(status)) {
+        return res.status(400).send({ message: "Invalid status" });
+    }
+
+    const updateData = {
+        status,
+        updatedAt: new Date()
+    };
+
+    if (status === "Rejected" && rejectionReason) {
+        updateData.rejectionReason = rejectionReason;
+    }
+
+    const updateQuery = {
+        $set: updateData
+    };
+
+    if (status === "Approved") {
+        updateQuery.$unset = { rejectionReason: "" };
+    }
+
+    const result = await equipmentCollection.updateOne(
+        { _id: new ObjectId(id) },
+        updateQuery
+    );
+
+    if (result.matchedCount === 0) {
+        return res.status(404).send({ message: "Equipment not found" });
+    }
+
+    res.send({ message: "Equipment status updated successfully." });
+});
+
+// Update equipment by admin
+router.patch("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID" });
+    }
+
+    const data = {};
+
+    for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+            data[field] = req.body[field];
+        }
+    }
+
+    if (Object.keys(data).length === 0) {
+        return res.status(400).send({
+            message: "No information provided to update."
+        });
+    }
+
+    data.updatedAt = new Date();
+
+    const result = await equipmentCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: data }
+    );
+
+    if (result.matchedCount === 0) {
+        return res.status(404).send({ message: "Equipment not found" });
+    }
+
+    res.send({ message: "Equipment updated successfully." });
+});
+
+// Delete equipment by admin
+router.delete("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID" });
+    }
+
+    const result = await equipmentCollection.deleteOne({
+        _id: new ObjectId(id)
+    });
+
+    if (result.deletedCount === 0) {
+        return res.status(404).send({ message: "Equipment not found" });
+    }
+
+    res.send({ message: "Equipment deleted successfully." });
 });
 
 // Get single equipment
@@ -60,45 +196,19 @@ router.get("/:id", verifyToken, async (req, res) => {
     res.send(result);
 });
 
-
-
-// Get all equipment for admin
-router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
-    const result = await equipmentCollection.find({}).toArray();
-
-    res.send(result);
-});
-
-// Update equipment status by admin
-router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => {
-    const { id } = req.params;
-    const data = req.body;
-
-    if (!ObjectId.isValid(id)) {
-        return res.status(400).send({ message: "Invalid equipment ID" });
-    }
-
-    if (!["Approved", "Rejected"].includes(data.status)) {
-        return res.status(400).send({ message: "Invalid status" });
-    }
-
-    const result = await equipmentCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: data }
-    );
-
-    res.send(result);
-});
-
 // Get approved equipment with search and filters
 router.get("/", async (req, res) => {
-    const { search, category, rentalType, availability, minPrice, maxPrice } = req.query;
+    const {
+        search,
+        category,
+        rentalType,
+        availability,
+        minPrice,
+        maxPrice
+    } = req.query;
 
-    const query = {
-        status: "Approved"
-    };
+    const query = { status: "Approved" };
 
-    // Search by equipment name or category
     if (search) {
         query.$or = [
             { name: { $regex: search, $options: "i" } },
@@ -107,16 +217,9 @@ router.get("/", async (req, res) => {
         ];
     }
 
-    // Filter by category
-    if (category) {
-        query.category = category;
-    }
+    if (category) query.category = category;
+    if (rentalType) query.rentalType = rentalType;
 
-    if (rentalType) {
-        query.rentalType = rentalType;
-    }
-
-    // Filter by availability
     if (availability === "available") {
         query.availableQuantity = { $gt: 0 };
     } else if (availability === "unavailable") {
@@ -126,46 +229,28 @@ router.get("/", async (req, res) => {
     if (minPrice || maxPrice) {
         query.rentalPrice = {};
 
-        if (minPrice) {
-            query.rentalPrice.$gte = Number(minPrice);
-        }
-
-        if (maxPrice) {
-            query.rentalPrice.$lte = Number(maxPrice);
-        }
+        if (minPrice) query.rentalPrice.$gte = Number(minPrice);
+        if (maxPrice) query.rentalPrice.$lte = Number(maxPrice);
     }
 
     const sort = {};
 
-    if (req.query.sort === "price-low") {
-        sort.rentalPrice = 1;
-    } else if (req.query.sort === "price-high") {
-        sort.rentalPrice = -1;
-    } else if (req.query.sort === "recently-added") {
-        sort.createdAt = -1;
-    }
+    if (req.query.sort === "price-low") sort.rentalPrice = 1;
+    else if (req.query.sort === "price-high") sort.rentalPrice = -1;
+    else if (req.query.sort === "recently-added") sort.createdAt = -1;
 
-    const result = await equipmentCollection
-        .find(query)
-        .sort(sort)
-        .toArray();
+    const result = await equipmentCollection.find(query).sort(sort).toArray();
 
     res.send(result);
 });
 
-// Update equipment
+// Update equipment by owner
 router.patch("/:id", verifyToken, verifyOwner, async (req, res) => {
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
         return res.status(400).send({ message: "Invalid equipment ID." });
     }
-
-    const allowedFields = [
-        "name", "description", "category", "location",
-        "rentalPrice", "rentalType", "availableQuantity",
-        "condition", "brand", "model", "imageUrl", "rentalTerms"
-    ];
 
     const data = {};
 
@@ -176,7 +261,9 @@ router.patch("/:id", verifyToken, verifyOwner, async (req, res) => {
     }
 
     if (Object.keys(data).length === 0) {
-        return res.status(400).send({ message: "No information provided to update." });
+        return res.status(400).send({
+            message: "No information provided to update."
+        });
     }
 
     data.updatedAt = new Date();
@@ -198,7 +285,7 @@ router.patch("/:id", verifyToken, verifyOwner, async (req, res) => {
     res.send({ message: "Equipment updated successfully." });
 });
 
-// Delete equipment
+// Delete equipment by owner
 router.delete("/:id", verifyToken, verifyOwner, async (req, res) => {
     const { id } = req.params;
 

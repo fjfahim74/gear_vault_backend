@@ -7,7 +7,7 @@ import {
     usersCollection,
     paymentsCollection
 } from "../../config/db.js";
-import verifyToken, { verifyRenter } from "../../middlewares/verifyApi.js";
+import verifyToken, { verifyRenter, verifyOwner } from "../../middlewares/verifyApi.js";
 import { stripe } from "../../config/stripe.js";
 import processCheckoutSession from "../../utils/processCheckoutSession.js";
 
