@@ -75,6 +75,56 @@ router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
     }
 });
 
+// Update a rental booking status (Admin only)
+router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { bookingStatus } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+            message: "Invalid rental record."
+        });
+    }
+
+    if (!["Completed", "Cancelled"].includes(bookingStatus)) {
+        return res.status(400).send({
+            message: "Invalid booking status."
+        });
+    }
+
+    try {
+        const result = await bookingsCollection.updateOne(
+            {
+                _id: new ObjectId(id),
+                bookingStatus: "Confirmed"
+            },
+            {
+                $set: {
+                    bookingStatus,
+                    updatedAt: new Date()
+                }
+            }
+        );
+
+        if (!result.matchedCount) {
+            return res.status(404).send({
+                message: "Confirmed rental not found. It may already be managed."
+            });
+        }
+
+        res.send({
+            success: true,
+            message: `Rental marked as ${bookingStatus.toLowerCase()}.`
+        });
+
+    } catch (error) {
+        console.error("Admin rental update error:", error);
+        res.status(500).send({
+            message: "Failed to update rental status."
+        });
+    }
+});
+
 // Get customer's rentals
 router.get("/my-rentals", verifyToken, verifyRenter, async (req, res) => {
     const bookings = await bookingsCollection.find({
