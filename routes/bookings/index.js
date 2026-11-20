@@ -13,6 +13,31 @@ import processCheckoutSession from "../../utils/processCheckoutSession.js";
 
 const router = Router();
 
+// Get customer's rentals
+router.get("/my-rentals", verifyToken, verifyRenter, async (req, res) => {
+    const bookings = await bookingsCollection.find({
+        customerId: req.user.id
+    }).sort({ createdAt: -1 }).toArray();
+
+    const payments = await paymentsCollection.find({
+        customerId: req.user.id
+    }).toArray();
+
+    const paymentMap = new Map(
+        payments.map(payment => [
+            payment.stripeSessionId,
+            payment.currency
+        ])
+    );
+
+    const result = bookings.map(booking => ({
+        ...booking,
+        currency: paymentMap.get(booking.stripeSessionId) || "usd"
+    }));
+
+    res.send(result);
+});
+
 // Check Equipment Availability
 router.get("/availability", verifyToken, verifyRenter, async (req, res) => {
     const { equipmentId, startDate, endDate, quantity } = req.query;
