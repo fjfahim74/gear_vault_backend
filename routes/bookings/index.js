@@ -7,12 +7,73 @@ import {
     usersCollection,
     paymentsCollection
 } from "../../config/db.js";
-import verifyToken, { verifyRenter, verifyOwner } from "../../middlewares/verifyApi.js";
+import verifyToken, { verifyRenter, verifyOwner, verifyAdmin } from "../../middlewares/verifyApi.js";
 import { stripe } from "../../config/stripe.js";
 import processCheckoutSession from "../../utils/processCheckoutSession.js";
 
 
 const router = Router();
+
+// Get all rental records for Admin
+router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const bookings = await bookingsCollection
+            .find({})
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        const userIds = [
+            ...new Set(bookings.flatMap(booking => [
+                booking.customerId,
+                booking.ownerId
+            ]))
+        ].filter(id => ObjectId.isValid(id));
+
+        const users = await usersCollection.find({
+            _id: { $in: userIds.map(id => new ObjectId(id)) }
+        }).toArray();
+
+        const userMap = new Map(
+            users.map(user => [user._id.toString(), user])
+        );
+
+        const sessionIds = bookings
+            .map(booking => booking.stripeSessionId)
+            .filter(Boolean);
+
+        const payments = await paymentsCollection.find({
+            stripeSessionId: { $in: sessionIds }
+        }).toArray();
+
+        const paymentMap = new Map(
+            payments.map(payment => [payment.stripeSessionId, payment])
+        );
+
+        const result = bookings.map(booking => {
+            const customer = userMap.get(booking.customerId);
+            const owner = userMap.get(booking.ownerId);
+            const payment = paymentMap.get(booking.stripeSessionId);
+
+            return {
+                ...booking,
+                customerName: customer?.name || booking.customerEmail || "Unknown customer",
+                customerEmail: booking.customerEmail || customer?.email || "",
+                ownerName: owner?.name || booking.ownerEmail || "Unknown owner",
+                ownerEmail: booking.ownerEmail || owner?.email || "",
+                paymentStatus: payment?.status || booking.paymentStatus || "Unknown",
+                currency: payment?.currency || process.env.STRIPE_CURRENCY || "usd"
+            };
+        });
+
+        res.send(result);
+
+    } catch (error) {
+        console.error("Admin rentals fetch error:", error);
+        res.status(500).send({
+            message: "Failed to load rental records."
+        });
+    }
+});
 
 // Get customer's rentals
 router.get("/my-rentals", verifyToken, verifyRenter, async (req, res) => {
