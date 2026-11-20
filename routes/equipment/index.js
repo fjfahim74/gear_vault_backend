@@ -56,28 +56,22 @@ router.get("/my-equipment", verifyToken, verifyOwner, async (req, res) => {
 
 // Get all equipment for admin
 router.get("/admin/all", verifyToken, verifyAdmin, async (req, res) => {
-    const equipment = await equipmentCollection.find({}).toArray();
+    const result = await equipmentCollection.find({}).toArray();
 
-    const ownerEmails = [...new Set(
-        equipment.map((item) => item.ownerEmail).filter(Boolean)
-    )];
+    const equipmentWithOwners = await Promise.all(
+        result.map(async (item) => {
+            const owner = await usersCollection.findOne({
+                email: item.ownerEmail
+            });
 
-    const owners = await usersCollection.find({
-        email: { $in: ownerEmails }
-    }).toArray();
+            return {
+                ...item,
+                ownerName: owner?.name || "Equipment Owner"
+            };
+        })
+    );
 
-    const result = equipment.map((item) => {
-        const owner = owners.find(
-            (user) => user.email === item.ownerEmail
-        );
-
-        return {
-            ...item,
-            ownerName: owner?.name || "Unknown"
-        };
-    });
-
-    res.send(result);
+    res.send(equipmentWithOwners);
 });
 
 // Update equipment status by admin
@@ -86,11 +80,11 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
     const { status, rejectionReason } = req.body;
 
     if (!ObjectId.isValid(id)) {
-        return res.status(400).send({ message: "Invalid equipment ID" });
+        return res.status(400).send({ message: "Invalid equipment ID." });
     }
 
     if (!["Approved", "Rejected"].includes(status)) {
-        return res.status(400).send({ message: "Invalid status" });
+        return res.status(400).send({ message: "Invalid status." });
     }
 
     const updateData = {
@@ -102,24 +96,96 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
         updateData.rejectionReason = rejectionReason;
     }
 
-    const updateQuery = {
+    const updateOperation = {
         $set: updateData
     };
 
     if (status === "Approved") {
-        updateQuery.$unset = { rejectionReason: "" };
+        updateOperation.$unset = {
+            rejectionReason: ""
+        };
     }
 
     const result = await equipmentCollection.updateOne(
         { _id: new ObjectId(id) },
-        updateQuery
+        updateOperation
     );
 
     if (result.matchedCount === 0) {
-        return res.status(404).send({ message: "Equipment not found" });
+        return res.status(404).send({ message: "Equipment not found." });
     }
 
     res.send({ message: "Equipment status updated successfully." });
+});
+
+// Update equipment by admin
+router.patch("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID." });
+    }
+
+    const allowedFields = [
+        "name",
+        "description",
+        "category",
+        "location",
+        "rentalPrice",
+        "rentalType",
+        "availableQuantity",
+        "condition",
+        "brand",
+        "model",
+        "rentalTerms"
+    ];
+
+    const data = {};
+
+    for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+            data[field] = req.body[field];
+        }
+    }
+
+    if (Object.keys(data).length === 0) {
+        return res.status(400).send({
+            message: "No information provided to update."
+        });
+    }
+
+    data.updatedAt = new Date();
+
+    const result = await equipmentCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: data }
+    );
+
+    if (result.matchedCount === 0) {
+        return res.status(404).send({ message: "Equipment not found." });
+    }
+
+    res.send({ message: "Equipment updated successfully." });
+});
+
+
+// Delete equipment by admin
+router.delete("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ message: "Invalid equipment ID." });
+    }
+
+    const result = await equipmentCollection.deleteOne({
+        _id: new ObjectId(id)
+    });
+
+    if (result.deletedCount === 0) {
+        return res.status(404).send({ message: "Equipment not found." });
+    }
+
+    res.send({ message: "Equipment deleted successfully." });
 });
 
 // Update equipment by admin
