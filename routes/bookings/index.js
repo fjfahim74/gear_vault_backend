@@ -4,6 +4,7 @@ import {
     equipmentCollection,
     bookingsCollection,
     bookingHoldsCollection,
+    usersCollection,
     paymentsCollection
 } from "../../config/db.js";
 import verifyToken, { verifyRenter } from "../../middlewares/verifyApi.js";
@@ -32,6 +33,44 @@ router.get("/my-rentals", verifyToken, verifyRenter, async (req, res) => {
 
     const result = bookings.map(booking => ({
         ...booking,
+        currency: paymentMap.get(booking.stripeSessionId) || "usd"
+    }));
+
+    res.send(result);
+});
+
+// Get owner's equipment rentals
+router.get("/owner-rentals", verifyToken, verifyOwner, async (req, res) => {
+    const bookings = await bookingsCollection.find({
+        ownerId: req.user.id
+    }).sort({ createdAt: -1 }).toArray();
+
+    const payments = await paymentsCollection.find({
+        customerId: { $in: [...new Set(bookings.map(booking => booking.customerId))] }
+    }).toArray();
+
+    const paymentMap = new Map(
+        payments.map(payment => [
+            payment.stripeSessionId,
+            payment.currency
+        ])
+    );
+
+    const customerIds = [
+        ...new Set(bookings.map(booking => booking.customerId))
+    ];
+
+    const users = await usersCollection.find({
+        _id: { $in: customerIds.filter(ObjectId.isValid).map(id => new ObjectId(id)) }
+    }).toArray();
+
+    const userMap = new Map(
+        users.map(user => [user._id.toString(), user.name])
+    );
+
+    const result = bookings.map(booking => ({
+        ...booking,
+        customerName: userMap.get(booking.customerId) || booking.customerEmail,
         currency: paymentMap.get(booking.stripeSessionId) || "usd"
     }));
 
