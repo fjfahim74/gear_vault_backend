@@ -5,7 +5,8 @@ import {
     bookingsCollection,
     paymentsCollection
 } from "../../config/db.js";
-import verifyToken, { verifyAdmin } from "../../middlewares/verifyApi.js";
+import verifyToken, { verifyAdmin, verifyOwner } from "../../middlewares/verifyApi.js";
+import { ObjectId } from "mongodb";
 
 const router = Router();
 
@@ -192,6 +193,171 @@ router.get("/admin", verifyToken, verifyAdmin, async (req, res) => {
 
         res.status(500).send({
             message: "Failed to load Admin analytics."
+        });
+    }
+});
+
+// Get Owner Dashboard Analytics
+router.get("/owner", verifyToken, verifyOwner, async (req, res) => {
+    try {
+        const ownerId = req.user.id;
+
+        const [equipment, bookings] = await Promise.all([
+            equipmentCollection.find({ ownerId }).toArray(),
+            bookingsCollection
+                .find({ ownerId })
+                .sort({ createdAt: -1 })
+                .toArray()
+        ]);
+
+        // Get paid payments belonging to this owner's bookings
+        const bookingIds = bookings.map(booking => booking._id);
+
+        const payments = await paymentsCollection.find({
+            bookingId: { $in: bookingIds },
+            status: "Paid"
+        }).toArray();
+
+        const paymentMap = new Map(
+            payments.map(payment => [
+                payment.bookingId.toString(),
+                payment
+            ])
+        );
+
+        // Total earnings
+        const totalEarnings = payments.reduce(
+            (total, payment) => total + Number(payment.amount || 0),
+            0
+        );
+
+        // Completed rentals
+        const completedRentals = bookings.filter(
+            booking => booking.bookingStatus === "Completed"
+        ).length;
+
+        // Last 12 months
+        const monthlyEarnings = [];
+
+        for (let i = 11; i >= 0; i--) {
+            const date = new Date();
+            date.setUTCDate(1);
+            date.setUTCHours(0, 0, 0, 0);
+            date.setUTCMonth(date.getUTCMonth() - i);
+
+            monthlyEarnings.push({
+                month: date.toLocaleString("en-US", {
+                    month: "short",
+                    timeZone: "UTC"
+                }),
+                year: date.getUTCFullYear(),
+                key: `${date.getUTCFullYear()}-${date.getUTCMonth()}`,
+                earnings: 0
+            });
+        }
+
+        payments.forEach(payment => {
+            if (!payment.paidAt) return;
+
+            const date = new Date(payment.paidAt);
+            const key = `${date.getUTCFullYear()}-${date.getUTCMonth()}`;
+
+            const month = monthlyEarnings.find(item => item.key === key);
+
+            if (month) {
+                month.earnings += Number(payment.amount || 0);
+            }
+        });
+
+        // Equipment listings by status
+        const statusCounts = {};
+
+        equipment.forEach(item => {
+            const status = item.status || "Other";
+
+            statusCounts[status] = (statusCounts[status] || 0) + 1;
+        });
+
+        const listingsByStatus = Object.entries(statusCounts).map(
+            ([status, count]) => ({ status, count })
+        );
+
+        // Top earning equipment
+        const equipmentEarnings = {};
+
+        bookings.forEach(booking => {
+            const payment = paymentMap.get(booking._id.toString());
+
+            if (!payment) return;
+
+            const id = booking.equipmentId;
+
+            if (!equipmentEarnings[id]) {
+                equipmentEarnings[id] = {
+                    name: booking.equipmentName,
+                    earnings: 0
+                };
+            }
+
+            equipmentEarnings[id].earnings += Number(payment.amount || 0);
+        });
+
+        const topEquipment = Object.values(equipmentEarnings)
+            .sort((a, b) => b.earnings - a.earnings)
+            .slice(0, 5);
+
+        // Recent rental requests
+        const recentBookings = bookings.slice(0, 5);
+
+        const customerIds = [
+            ...new Set(recentBookings.map(booking => booking.customerId))
+        ];
+
+        const customers = await usersCollection.find({
+            _id: {
+                $in: customerIds
+                    .filter(id => ObjectId.isValid(id))
+                    .map(id => new ObjectId(id))
+            }
+        }).toArray();
+
+        const customerMap = new Map(
+            customers.map(customer => [
+                customer._id.toString(),
+                customer.name
+            ])
+        );
+
+        const recentRequests = recentBookings.map(booking => ({
+            _id: booking._id,
+            customerName:
+                customerMap.get(booking.customerId) ||
+                booking.customerEmail ||
+                "Customer",
+            equipmentName: booking.equipmentName,
+            totalAmount: booking.totalAmount,
+            bookingStatus: booking.bookingStatus,
+            createdAt: booking.createdAt
+        }));
+
+        res.send({
+            totalEquipment: equipment.length,
+            completedRentals,
+            totalEarnings,
+            thisMonthEarnings:
+                monthlyEarnings[monthlyEarnings.length - 1].earnings,
+            currency: payments[0]?.currency || process.env.STRIPE_CURRENCY || "usd",
+            monthlyEarnings,
+            listingsByStatus,
+            topEquipment,
+            recentRequests
+        });
+
+    } catch (error) {
+        console.error("Owner analytics error:", error);
+
+        res.status(500).send({
+            message: "Failed to load owner analytics."
         });
     }
 });
