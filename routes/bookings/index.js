@@ -86,17 +86,15 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
         });
     }
 
-    if (!["Completed", "Cancelled"].includes(bookingStatus)) {
+    if (!["Confirmed", "Completed", "Cancelled"].includes(bookingStatus)) {
         return res.status(400).send({
             message: "Invalid booking status."
         });
     }
-
     try {
         const result = await bookingsCollection.updateOne(
             {
                 _id: new ObjectId(id),
-                bookingStatus: "Confirmed"
             },
             {
                 $set: {
