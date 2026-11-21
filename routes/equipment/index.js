@@ -188,61 +188,6 @@ router.delete("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
     res.send({ message: "Equipment deleted successfully." });
 });
 
-// Update equipment by admin
-router.patch("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-        return res.status(400).send({ message: "Invalid equipment ID" });
-    }
-
-    const data = {};
-
-    for (const field of allowedFields) {
-        if (req.body[field] !== undefined) {
-            data[field] = req.body[field];
-        }
-    }
-
-    if (Object.keys(data).length === 0) {
-        return res.status(400).send({
-            message: "No information provided to update."
-        });
-    }
-
-    data.updatedAt = new Date();
-
-    const result = await equipmentCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: data }
-    );
-
-    if (result.matchedCount === 0) {
-        return res.status(404).send({ message: "Equipment not found" });
-    }
-
-    res.send({ message: "Equipment updated successfully." });
-});
-
-// Delete equipment by admin
-router.delete("/admin/:id", verifyToken, verifyAdmin, async (req, res) => {
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-        return res.status(400).send({ message: "Invalid equipment ID" });
-    }
-
-    const result = await equipmentCollection.deleteOne({
-        _id: new ObjectId(id)
-    });
-
-    if (result.deletedCount === 0) {
-        return res.status(404).send({ message: "Equipment not found" });
-    }
-
-    res.send({ message: "Equipment deleted successfully." });
-});
-
 // Get single equipment
 router.get("/:id", verifyToken, async (req, res) => {
     const { id } = req.params;
