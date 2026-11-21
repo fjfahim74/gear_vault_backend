@@ -196,9 +196,21 @@ router.get("/:id", verifyToken, async (req, res) => {
         return res.status(400).send({ message: "Invalid equipment ID" });
     }
 
-    const result = await equipmentCollection.findOne({
+    const query = {
         _id: new ObjectId(id)
-    });
+    };
+
+    if (req.user.role === "Customer") {
+        query.status = "Approved";
+    }
+    else if (req.user.role === "Owner") {
+        query.ownerId = req.user.id;
+    }
+    else if (req.user.role !== "Admin") {
+        return res.status(403).send({ message: "Forbidden!" });
+    }
+
+    const result = await equipmentCollection.findOne(query);
 
     if (!result) {
         return res.status(404).send({ message: "Equipment not found" });
