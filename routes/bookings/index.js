@@ -10,7 +10,7 @@ import {
 import verifyToken, { verifyRenter, verifyOwner, verifyAdmin } from "../../middlewares/verifyApi.js";
 import { stripe } from "../../config/stripe.js";
 import processCheckoutSession from "../../utils/processCheckoutSession.js";
-
+import sendBookingCompletedEmails from "../../utils/sendBookingCompletedEmails.js";
 
 const router = Router();
 
@@ -91,10 +91,21 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
             message: "Invalid booking status."
         });
     }
+
     try {
+        const existingBooking = await bookingsCollection.findOne({
+            _id: new ObjectId(id)
+        });
+
+        if (!existingBooking) {
+            return res.status(404).send({
+                message: "Confirmed rental not found. It may already be managed."
+            });
+        }
+
         const result = await bookingsCollection.updateOne(
             {
-                _id: new ObjectId(id),
+                _id: new ObjectId(id)
             },
             {
                 $set: {
@@ -106,8 +117,16 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
 
         if (!result.matchedCount) {
             return res.status(404).send({
-                message: "Confirmed rental not found. It may already be managed."
+                message: "Rental record not found."
             });
+        }
+
+        // Send emails only when the booking becomes completed
+        if (
+            bookingStatus === "Completed" &&
+            existingBooking.bookingStatus !== "Completed"
+        ) {
+            sendBookingCompletedEmails(existingBooking);
         }
 
         res.send({
@@ -117,6 +136,7 @@ router.patch("/admin/:id/status", verifyToken, verifyAdmin, async (req, res) => 
 
     } catch (error) {
         console.error("Admin rental update error:", error);
+
         res.status(500).send({
             message: "Failed to update rental status."
         });
